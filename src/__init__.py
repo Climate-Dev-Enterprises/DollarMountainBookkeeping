@@ -2,6 +2,7 @@ import logging
 
 from args import args
 from data_importer import DataImporter
+from data_translator_from_journal import JournalDataImporter
 
 if __name__ == '__main__':
     logging.info('Launched Climate Dev CSV tool')
@@ -12,7 +13,8 @@ if __name__ == '__main__':
         print(data_importer.file_path)
 
         data_importer.load_data()
+        data_importer.write_output_file()
 
     # Import from journal job
     if args.import_journal:
-        pass
+        data_importer = JournalDataImporter(args)
