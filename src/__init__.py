@@ -17,4 +17,6 @@ if __name__ == '__main__':
 
     # Import from journal job
     if args.import_journal:
-        data_importer = JournalDataImporter(args)
+        journal_data_importer = JournalDataImporter(args)
+
+        journal_data_importer.build_composite_dataframe()

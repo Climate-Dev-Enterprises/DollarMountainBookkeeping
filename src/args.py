@@ -2,7 +2,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--output-file", type=str, help="File name for ouput from importing data. Default is output.csv", default="output.csv")
-parser.add_argument("--file-path", type=str, help="Path to the file to load data from. Default is ../data/output.csv", default="../data/output.csv")
+parser.add_argument("--file-path", type=str, help="Path to the file to load data from. Default is ../data/", default="../data/")
 parser.add_argument("--date", type=int, help="Date you want to use for running the generator script (in yyyymmddformat) Default is 20240101", default=20240101)
 parser.add_argument("--accounts", type=str,
                     help="Accounts required in the journal entry. Default is 02-002 Sales:Food and Beverage Sales, 02-004 Tip Income, 01-031 Delivery App Fees and Commissions:ChowNow fees and commissions, 02-007 Customer Refunds, 07-011 Taxes Payable:Sales and Restaurant Tax Payable",

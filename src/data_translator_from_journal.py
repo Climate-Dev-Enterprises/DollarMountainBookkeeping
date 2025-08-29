@@ -2,15 +2,52 @@
 
 import pandas as pd
 import numpy as np
+import logging
+import os
+
 from datetime import datetime
 
 class JournalDataImporter:
 
     def __init__(self, args):
-        pass
+        self.date = args.date
+        self.file_path = args.file_path
+        self.file_list = self.load_source_data_file()
+        print(self.file_list)
 
     def load_source_data_file(self):
-        pass
+        '''
+        This scans the file tree given in the input file path for the needed TL and DR xlsx files
+        Those files are appended to the file list so that we can generate a final composite file
+        '''
+        file_list = []
+        if not os.path.exists(self.file_path):
+            raise Exception('The specified file path {self.file_path} was not found')
+
+        # Walk the data directory and grab all DR and TL xlsx files that match that date
+        for root, dirs, files in os.walk(self.file_path):
+            for name in files:
+                if name.endswith('xlsx'):
+                    if name.startswith(f'{self.date}-DR') or name.startswith(f'{self.date}-TL'):
+                        fid = os.path.join(root, name)
+                        file_list.append(fid)
+        return file_list
+
+    def build_composite_dataframe(self):
+        '''
+        '''
+        for file in self.file_list:
+            if '-TL' in file:
+                # Then it's a transaction file
+                pass
+            elif '-DR' in file:
+                # Then it's a deposit file
+                pass
+            else:
+                logging.warning(f'An unknown file {file} was found that does not match a deposit or transaction file. Skipping.')
+                continue
+
+
 
 # # === FILE PATHS ===
 # transaction_file = "Transaction List.xlsx"
