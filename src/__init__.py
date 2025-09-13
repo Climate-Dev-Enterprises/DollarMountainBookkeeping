@@ -5,7 +5,7 @@ from data_importer import DataImporter
 from data_translator_from_journal import JournalDataImporter
 
 if __name__ == '__main__':
-    logging.info('Launched Climate Dev CSV tool')
+    logging.info('Launched Climate Dev Bookkeeping tools')
 
     # Chow now data importer
     if args.is_chow_now:

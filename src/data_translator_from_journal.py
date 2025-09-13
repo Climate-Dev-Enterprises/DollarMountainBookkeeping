@@ -12,8 +12,10 @@ class JournalDataImporter:
     def __init__(self, args):
         self.date = args.date
         self.file_path = args.file_path
+        self.journal_keys = args.journal_keys.split(',')
         self.file_list = self.load_source_data_file()
-        print(self.file_list)
+        #print(self.file_list)
+        #print(self.journal_keys)
 
     def load_source_data_file(self):
         '''
@@ -36,18 +38,69 @@ class JournalDataImporter:
     def build_composite_dataframe(self):
         '''
         '''
+        self.output_df = pd.DataFrame(columns=self.journal_keys)
         for file in self.file_list:
             if '-TL' in file:
                 # Then it's a transaction file
-                pass
+                transaction_df = pd.read_excel(file, engine='openpyxl', skiprows=22)
             elif '-DR' in file:
                 # Then it's a deposit file
-                pass
+                deposit_df = pd.read_excel(file, engine='openpyxl')
             else:
                 logging.warning(f'An unknown file {file} was found that does not match a deposit or transaction file. Skipping.')
                 continue
 
+        #print(self.deposit_df['TranNum'])
+        #print(self.transaction_df.columns)
+        #print(self.output_df)
 
+        # Remove currency sign and change () to negative
+        self.check_for_signed_float(deposit_df)
+        self.check_for_signed_float(transaction_df)
+
+        for column in deposit_df.columns:
+            try:
+                deposit_df[column] = deposit_df[column].str.replace('$', '', regex=False)
+                deposit_df[column] = deposit_df[column].apply(lambda x: -float(x.strip('()')) if '(' in x else float(x))
+            except (AttributeError, ValueError):
+                # Not a float, leave alone
+                continue
+
+        for index, entry in transaction_df.iterrows():
+            data_row = {}
+            # Match the transaction ids between the 2 dataframes
+            transaction_number = entry['Transaction ID']
+            transaction_row = deposit_df.loc[deposit_df['TranNum'] == transaction_number]
+            #print(entry)
+            if transaction_row.empty:
+                print('not found')
+            else:
+                # It's on both reports, so we have a depost to account for
+                # The total amount for this transaction is the fee from this row + (minus) any net amounts less than 0
+                # TODO: There can be more than 1 of the net negative rows and this needs to be tested
+                print('found')
+                negative_net_row = deposit_df.loc[deposit_df['NetAmount'].astype(str).astype(float) < 0]
+                net_amount = str(sum([transaction_row['Fee'].iloc[0], negative_net_row['NetAmount'].iloc[0]])).replace('-', '-$')
+                data_row['#'] = index
+                data_row['Received From'] = 'Vagaro'
+                data_row['Account'] = 'Right now I do not give a shit'
+                data_row['Description'] = 'Vagaro Merchant Services Depost'
+                data_row['Payment Method'] = ''
+                data_row['Ref No.'] = ''
+                data_row['Amount'] = net_amount
+                print(data_row)
+        kill()
+
+    def check_for_signed_float(self, df):
+        '''
+        '''
+        for column in df.columns:
+            try:
+                df[column] = df[column].str.replace('$', '', regex=False)
+                df[column] = df[column].apply(lambda x: -float(x.strip('()')) if '(' in x else float(x))
+            except (AttributeError, ValueError):
+                # Not a float, leave alone
+                continue
 
 # # === FILE PATHS ===
 # transaction_file = "Transaction List.xlsx"
