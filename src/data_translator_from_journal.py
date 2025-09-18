@@ -14,8 +14,7 @@ class JournalDataImporter:
         self.file_path = args.file_path
         self.journal_keys = args.journal_keys.split(',')
         self.file_list = self.load_source_data_file()
-        #print(self.file_list)
-        #print(self.journal_keys)
+        self.output_file = f'../data/{self.date}-journal_entry.csv'
 
     def load_source_data_file(self):
         '''
@@ -37,6 +36,10 @@ class JournalDataImporter:
 
     def build_composite_dataframe(self):
         '''
+        This loads in the relevant transactions and deposits files for the given dates
+
+        Then, we build the dataframe out to house the data with the given rules:
+            # TODO: once you understand the rules, fill this out
         '''
         self.output_df = pd.DataFrame(columns=self.journal_keys)
         for file in self.file_list:
@@ -50,49 +53,84 @@ class JournalDataImporter:
                 logging.warning(f'An unknown file {file} was found that does not match a deposit or transaction file. Skipping.')
                 continue
 
-        #print(self.deposit_df['TranNum'])
-        #print(self.transaction_df.columns)
-        #print(self.output_df)
-
         # Remove currency sign and change () to negative
-        self.check_for_signed_float(deposit_df)
-        self.check_for_signed_float(transaction_df)
+        self.excel_currency_to_signed_float(deposit_df)
+        self.excel_currency_to_signed_float(transaction_df)
 
-        for column in deposit_df.columns:
-            try:
-                deposit_df[column] = deposit_df[column].str.replace('$', '', regex=False)
-                deposit_df[column] = deposit_df[column].apply(lambda x: -float(x.strip('()')) if '(' in x else float(x))
-            except (AttributeError, ValueError):
-                # Not a float, leave alone
-                continue
-
+        entry_number = 0 # This is the number of actual written rows in the final df
         for index, entry in transaction_df.iterrows():
-            data_row = {}
+            # Each row may have profit and fee information associated with it
+            # The code at the end ensures these are separate row numbers on the final csv
+            profit_row = {}
+            fee_row = {}
+
             # Match the transaction ids between the 2 dataframes
             transaction_number = entry['Transaction ID']
             transaction_row = deposit_df.loc[deposit_df['TranNum'] == transaction_number]
-            #print(entry)
+
             if transaction_row.empty:
-                print('not found')
+                # FIXME: This may not be right. I'm assuming some logic applies where a profi must be counted even if no fees
+                if entry['Transaction Type'] == 'Membership':
+                    profit_row['Received From'] = 'Massage Therapy Customers'
+                    profit_row['Account'] = '02-008 Membership Income'
+                    profit_row['Description'] = 'Vagaro Merchant Services Depost'
+                    profit_row['Payment Method'] = ''
+                    profit_row['Ref No.'] = ''
+                    profit_row['Amount'] = entry['Qty'] * entry['Price']
+
             else:
                 # It's on both reports, so we have a depost to account for
                 # The total amount for this transaction is the fee from this row + (minus) any net amounts less than 0
                 # TODO: There can be more than 1 of the net negative rows and this needs to be tested
-                print('found')
                 negative_net_row = deposit_df.loc[deposit_df['NetAmount'].astype(str).astype(float) < 0]
                 net_amount = str(sum([transaction_row['Fee'].iloc[0], negative_net_row['NetAmount'].iloc[0]])).replace('-', '-$')
-                data_row['#'] = index
-                data_row['Received From'] = 'Vagaro'
-                data_row['Account'] = 'Right now I do not give a shit'
-                data_row['Description'] = 'Vagaro Merchant Services Depost'
-                data_row['Payment Method'] = ''
-                data_row['Ref No.'] = ''
-                data_row['Amount'] = net_amount
-                print(data_row)
-        kill()
+                fee_row['Received From'] = 'Vagaro'
+                fee_row['Account'] = '01-017 Vagaro Fees'
+                fee_row['Description'] = 'Vagaro Merchant Services Depost'
+                fee_row['Payment Method'] = ''
+                fee_row['Ref No.'] = ''
+                fee_row['Amount'] = net_amount
 
-    def check_for_signed_float(self, df):
+                # We have the fee, now check for a profit on this transaction
+                if entry['Transaction Type'] == 'Membership':
+                    profit_row['Received From'] = 'Massage Therapy Customers'
+                    profit_row['Account'] = '02-008 Membership Income'
+                    profit_row['Description'] = 'Vagaro Merchant Services Depost'
+                    profit_row['Payment Method'] = ''
+                    profit_row['Ref No.'] = ''
+
+                    # Convert the profit amount back to currency (.00 on whole values)
+                    profit_amount = f"${str(entry['Qty'] * entry['Price'])}"
+                    if '.' not in profit_amount:
+                        profit_amount += '.00'
+                    profit_row['Amount'] = profit_amount
+
+            # Add new row for every profit and fee record
+            # Fees come 1st
+            data_set = [fee_row, profit_row]
+            for data_row in data_set:
+                if data_row:
+                    data_row['#'] = entry_number
+                    new_row_df = pd.DataFrame([data_row])
+                    self.output_df = pd.concat([self.output_df , new_row_df], ignore_index=True)
+
+        # Write to final csv file
+        print(self.output_df)
+        self.write_csv()
+
+    def write_csv(self):
         '''
+        Given a compiled dataframe, write the result to csv, logging any errors
+        '''
+        try:
+            self.output_df.to_csv(self.output_file, index=False)
+            logging.info(f'Output file written: {self.output_file}')
+        except Exception as e:
+            logging.error(f'Unable to write to file: {e}')
+
+    def excel_currency_to_signed_float(self, df):
+        '''
+        This takes an excel value that contains $ and () and converts it to signed float we can use
         '''
         for column in df.columns:
             try:
