@@ -14,7 +14,6 @@ if __name__ == '__main__':
         installer.install()
         sys.exit()
 
-    kill()
     # Check the date provided to ensure it is an integer in yyyymmdd format
     try:
         assert(len(str(args.date)) == 8)
