@@ -1,4 +1,5 @@
 import logging
+import sys
 
 from args import args
 from data_importer import DataImporter
@@ -11,8 +12,9 @@ if __name__ == '__main__':
     if args.install or args.reinstall:
         installer = Installer(reinstall = args.reinstall)
         installer.install()
+        sys.exit()
 
-    #kill()
+    kill()
     # Check the date provided to ensure it is an integer in yyyymmdd format
     try:
         assert(len(str(args.date)) == 8)

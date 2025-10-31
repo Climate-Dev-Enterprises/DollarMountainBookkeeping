@@ -47,10 +47,10 @@ class Installer:
         If any scripts get added, they should be built in here
         '''
         # Get the cron job schedule from the user
-        self.run_times = input('Enter the times you want this script to run on a 24 hour clock (e.g. 01 is 1 am, 13 is 1 pm) separated by a comma').split(',')
+        self.run_times = input('Enter the times you want this script to run on a 24 hour clock (e.g. 01 is 1 am, 13 is 1 pm) separated by a comma \n').split(',')
         for run_time in self.run_times:
             try:
-                assert(len(run_time) == 2)
+                assert(len(run_time) in [1, 2])
                 assert(int(run_time) < 24)
                 assert(int(run_time) >= 0)
             except (AssertionError, ValueError):
@@ -58,15 +58,15 @@ class Installer:
 
         # Choose scripts
         while True:
-            self.run_chow_now = input('Would you like to schedule the chow now script? Enter y for yes or n for n')
+            self.run_chow_now = input('Would you like to schedule the chow now script? Enter y for yes or n for n \n')
             if self.run_chow_now == 'y' or self.run_chow_now == 'n':
                 break
             else:
                 print('Pleae enter y for yes or n for no')
 
         while True:
-            self.run_journals = input('Would you like to schedule the journal builder script? Enter y for yes or n for n')
-            if self.run_jounrals == 'y' or self.run_journals == 'n':
+            self.run_journals = input('Would you like to schedule the journal builder script? Enter y for yes or n for n \n')
+            if self.run_journals == 'y' or self.run_journals == 'n':
                 break
             else:
                 print('Pleae enter y for yes or n for no')
@@ -78,19 +78,26 @@ class Installer:
         '''
         On linux systems, create a cronjob in the crontab using crontab library
         This defaults to running on the current user
+        This also comes with logging out of the box using the existing log file directory provided in the repo
+
+        NOTE: This comes with the ability to edit the cronfile out of the box by chmodding the contab
+        If you don not want this, comment this section out
         '''
-        cron = CronTab()
+        subprocess.call(['sudo chmod 2755 /usr/bin/crontab'], shell=True)
 
-        if self.run_chow_now:
-            job = cron.new(command=f'{self.working_directory}/autorun/chow_now_auto.sh')
-            job.minute.on(0)
-            job.hour.on(self.run_times)
+        cron = CronTab(user=True)
 
-        if self.run_journals:
-            # This job requires a date argument, but cron can except the current date as an argument
-            job = cron.new(command=f'{self.working_directory}/autorun/data_from_journal_auto.sh $(date +%Y%m%d)')
-            job.minute.on(0)
-            job.hour.on(self.run_times)
+        for run_time in self.run_times:
+            if self.run_chow_now:
+                job = cron.new(command=f'{self.working_directory}/autorun/chow_now_auto.sh >> {self.working_directory}/../logs/chow_now_auto.log 2>&1')
+                job.minute.on(0)
+                job.hour.on(run_time)
+
+            if self.run_journals:
+                # This job requires a date argument, but cron can except the current date as an argument
+                job = cron.new(command=f'{self.working_directory}/autorun/data_from_journal_auto.sh $(date +%Y%m%d) >> {self.working_directory}/../logs/journal_auto.log 2>&1')
+                job.minute.on(0)
+                job.hour.on(run_time)
         cron.write()
 
     def build_task_scheduler_jobs(self):
