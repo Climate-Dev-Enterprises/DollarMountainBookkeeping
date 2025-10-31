@@ -3,10 +3,16 @@ import logging
 from args import args
 from data_importer import DataImporter
 from data_translator_from_journal import JournalDataImporter
+from installer import Installer
 
 if __name__ == '__main__':
     logging.info('Launched Climate Dev Bookkeeping tools')
 
+    if args.install or args.reinstall:
+        installer = Installer(reinstall = args.reinstall)
+        installer.install()
+
+    #kill()
     # Check the date provided to ensure it is an integer in yyyymmdd format
     try:
         assert(len(str(args.date)) == 8)

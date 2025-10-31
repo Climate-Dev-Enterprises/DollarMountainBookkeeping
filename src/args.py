@@ -10,6 +10,8 @@ parser.add_argument("--accounts", type=str,
 parser.add_argument("--journal-keys", type=str,
                     help="Keys to include in a journal entry row. Default is Journal Date, Journal Number, Memo, Account, Debits, Credits",
                     default="Journal Date, Journal Number, Memo, Account, Debits, Credits")
+parser.add_argument("--install", action="store_true", help="Indicates we want to install the job to run automatically via cron or task scheduler.")
+parser.add_argument("--reinstall", action="store_true", help="Indicates we want to reinstall (maybe we want to cheange the scheduler)")
 parser.add_argument("--is-chow-now", action="store_true", help="Indicates this run should process the chow now import job")
 parser.add_argument("--import-journal", action="store_true", help="Indicates this run should process the generic data importer job")
 args, unknown_args = parser.parse_known_args()

@@ -15,6 +15,7 @@ class JournalDataImporter:
         self.journal_keys = args.journal_keys.split(',')
         self.file_list = self.load_source_data_file()
         self.output_file = f'../data/{self.date}-journal_entry.csv'
+        self.journal_date = datetime.strptime(str(self.date), "%Y%m%d").strftime("%m/%d/%Y")
 
     def load_source_data_file(self):
         '''
@@ -57,60 +58,82 @@ class JournalDataImporter:
         self.excel_currency_to_signed_float(deposit_df)
         self.excel_currency_to_signed_float(transaction_df)
 
-        entry_number = 0 # This is the number of actual written rows in the final df
         for index, entry in transaction_df.iterrows():
             # Each row may have profit and fee information associated with it
             # The code at the end ensures these are separate row numbers on the final csv
             profit_row = {}
             fee_row = {}
+            totals_row = {}
 
             # Match the transaction ids between the 2 dataframes
             transaction_number = entry['Transaction ID']
             transaction_row = deposit_df.loc[deposit_df['TranNum'] == transaction_number]
 
             if transaction_row.empty:
-                # FIXME: This may not be right. I'm assuming some logic applies where a profi must be counted even if no fees
+                # FIXME: This may not be right. I'm assuming some logic applies where a profit must be counted even if no fees
                 if entry['Transaction Type'] == 'Membership':
                     profit_row['Received From'] = 'Massage Therapy Customers'
-                    profit_row['Account'] = '02-008 Membership Income'
+                    profit_row['Account Name'] = '02-008 Membership Income'
                     profit_row['Description'] = 'Vagaro Merchant Services Depost'
                     profit_row['Payment Method'] = ''
                     profit_row['Ref No.'] = ''
-                    profit_row['Amount'] = entry['Qty'] * entry['Price']
+                    profit_row['Credits'] = entry['Qty'] * entry['Price']
+                    profit_row['Debits'] = ''
 
             else:
-                # It's on both reports, so we have a depost to account for
+                # It's on both reports, so we have a deposit to account for
                 # The total amount for this transaction is the fee from this row + (minus) any net amounts less than 0
                 # TODO: There can be more than 1 of the net negative rows and this needs to be tested
                 negative_net_row = deposit_df.loc[deposit_df['NetAmount'].astype(str).astype(float) < 0]
-                net_amount = str(sum([transaction_row['Fee'].iloc[0], negative_net_row['NetAmount'].iloc[0]])).replace('-', '-$')
+                raw_debit = sum([transaction_row['Fee'].iloc[0], negative_net_row['NetAmount'].iloc[0]])
+                net_amount = str(raw_debit).replace('-', '-$')
                 fee_row['Received From'] = 'Vagaro'
-                fee_row['Account'] = '01-017 Vagaro Fees'
+                fee_row['Account Name'] = '01-017 Vagaro Fees'
                 fee_row['Description'] = 'Vagaro Merchant Services Depost'
                 fee_row['Payment Method'] = ''
                 fee_row['Ref No.'] = ''
-                fee_row['Amount'] = net_amount
+                fee_row['Credits'] = ''
+                fee_row['Debits'] = net_amount
 
                 # We have the fee, now check for a profit on this transaction
+                # We'll use a raw_profit of 0 to cover cases where there is no profit in this transaction
+                raw_profit = 0
                 if entry['Transaction Type'] == 'Membership':
                     profit_row['Received From'] = 'Massage Therapy Customers'
-                    profit_row['Account'] = '02-008 Membership Income'
+                    profit_row['Account Name'] = '02-008 Membership Income'
                     profit_row['Description'] = 'Vagaro Merchant Services Depost'
                     profit_row['Payment Method'] = ''
                     profit_row['Ref No.'] = ''
 
                     # Convert the profit amount back to currency (.00 on whole values)
-                    profit_amount = f"${str(entry['Qty'] * entry['Price'])}"
+                    raw_profit = entry['Qty'] * entry['Price']
+                    profit_amount = f"${str(raw_profit)}"
                     if '.' not in profit_amount:
                         profit_amount += '.00'
-                    profit_row['Amount'] = profit_amount
+                    profit_row['Credits'] = profit_amount
+                    profit_row['Debits'] = ''
+
+                # Build the totals row to append
+                totals_row['Received From'] = 'Massage Therapy Customers'
+                totals_row['Account Name'] = '00-001 SLW Main Checking'
+                totals_row['Description'] = 'Vagaro Merchant Services Depost'
+                totals_row['Payment Method'] = ''
+                totals_row['Ref No.'] = ''
+                total_amount = raw_profit + raw_debit # We sum here because the value in debits is stored as negative
+                if total_amount > 0:
+                    totals_row['Credits'] = total_amount
+                    totals_row['Debits'] = ''
+                else:
+                    totals_row['Credits'] = ''
+                    totals_row['Debits'] = total_amount
 
             # Add new row for every profit and fee record
             # Fees come 1st
-            data_set = [fee_row, profit_row]
+            data_set = [fee_row, profit_row, totals_row]
             for data_row in data_set:
                 if data_row:
-                    data_row['#'] = entry_number
+                    data_row['Journal No.'] = self.date
+                    data_row['Journal Date'] = self.journal_date
                     new_row_df = pd.DataFrame([data_row])
                     self.output_df = pd.concat([self.output_df , new_row_df], ignore_index=True)
 
