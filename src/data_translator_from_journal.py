@@ -120,7 +120,9 @@ class JournalDataImporter:
                 totals_row['Payment Method'] = ''
                 totals_row['Ref No.'] = ''
                 total_amount = raw_profit + raw_debit # We sum here because the value in debits is stored as negative
-                if total_amount > 0:
+
+                # NOTE: These are inverted because that's how banks handle debits/credits
+                if total_amount < 0:
                     totals_row['Credits'] = total_amount
                     totals_row['Debits'] = ''
                 else:

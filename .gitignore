@@ -166,3 +166,6 @@ data/*
 
 # Lockfile
 *.lock
+
+# Logfiles
+*.log
