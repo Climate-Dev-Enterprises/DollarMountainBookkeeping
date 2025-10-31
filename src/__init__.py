@@ -7,6 +7,12 @@ from data_translator_from_journal import JournalDataImporter
 if __name__ == '__main__':
     logging.info('Launched Climate Dev Bookkeeping tools')
 
+    # Check the date provided to ensure it is an integer in yyyymmdd format
+    try:
+        assert(len(str(args.date)) == 8)
+    except AssertionError:
+        raise Exception("The length of the date given is not correct6. Make sure it is in yyyymmdd format (e.g. 20251031)")
+
     # Chow now data importer
     if args.is_chow_now:
         data_importer = DataImporter(args)
