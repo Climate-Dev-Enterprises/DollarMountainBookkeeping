@@ -163,3 +163,6 @@ cython_debug/
 data/*
 *.zip
 *.csv
+
+# Lockfile
+*.lock
