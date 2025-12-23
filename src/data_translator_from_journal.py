@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import logging
 import os
+import copy
 
 from datetime import datetime
 
@@ -35,6 +36,49 @@ class JournalDataImporter:
                         file_list.append(fid)
         return file_list
 
+    def maybe_load_discounts(self, transaction_df):
+        '''
+        Vagaro does a terrible job with the data, so this helper function fixes it
+        The column "disc" for discount should be the difference between the amount paid and the price
+        Where here the discount is only applied if the amount paid is less than the price
+        NOTE: The amount paid may be MORE than the price. This indicates a tip
+
+        :param transaction_df: The df containing the broken data from Vagaro
+        '''
+        if 'Price' in transaction_df and 'Amt paid' in transaction_df:
+            for index, entry in transaction_df.iterrows():
+                if 'Tip' in entry:
+                    discount = entry['Price'] + entry['Tip'] - entry['Amt paid']
+                else:
+                    discount = entry['Price'] - entry['Amt paid']
+                if discount > 0:
+                    entry['Disc'] = discount
+                transaction_df.loc[index] = entry
+        else:
+            logging.warning('The data here does not have the required columns for the discount to be calculated')
+        return transaction_df
+
+    def load_apply_discounts_column(self, transaction_df, deposit_df):
+        '''
+        This adds a column to the transactions  dataframe that indicates if a vdiscount should be applied
+        This runs over a range, which solves the problem of the ghost transactions
+
+        :param transaction_df: This is the dataframe containing all transaction rows
+        :param deposit_df: This is the datafram containg all deposit rows
+        '''
+        unique_transactions = deposit_df['TranNum'].unique()
+        common_transactions = transaction_df[transaction_df['Transaction ID'].isin(unique_transactions)]
+        matching_indices = range(common_transactions.index[0], common_transactions.index[-1])
+        discount_fields = []
+        for index, entry in transaction_df.iterrows():
+            if index in matching_indices:
+                entry['Apply Discount'] = 'yes'
+            else:
+                entry['Apply Discount'] = 'no'
+            discount_fields.append(entry['Apply Discount'])
+        transaction_df['Apply Discount'] = discount_fields
+        return transaction_df
+
     def build_composite_dataframe(self):
         '''
         This loads in the relevant transactions and deposits files for the given dates
@@ -58,12 +102,29 @@ class JournalDataImporter:
         self.excel_currency_to_signed_float(deposit_df)
         self.excel_currency_to_signed_float(transaction_df)
 
+        # Fix broken discount data
+        transaction_df = self.maybe_load_discounts(transaction_df)
+
+        # Using Katelyn's term for these, she calls there "ghost transactions"
+        # We have to find all of transactions that overlap between the 2 reports
+        # The ghost transactions are every row in between
+        # We'll do this by adding a new column because the data really should tell us this
+        transaction_df = self.load_apply_discounts_column(transaction_df, deposit_df)
+
+        # We need to ensure that debits are only written once for a single debit transaction
+        write_debits = True
+        has_single_debit = False
+        raw_profit = 0
+
         for index, entry in transaction_df.iterrows():
             # Each row may have profit and fee information associated with it
             # The code at the end ensures these are separate row numbers on the final csv
-            profit_row = {}
-            fee_row = {}
-            totals_row = {}
+            if has_single_debit is False:
+                profit_row = {}
+                fee_row = {}
+                totals_row = {}
+                tips_row = {}
+                discounts_row = {}
 
             # Match the transaction ids between the 2 dataframes
             transaction_number = entry['Transaction ID']
@@ -71,71 +132,110 @@ class JournalDataImporter:
 
             if transaction_row.empty:
                 # FIXME: This may not be right. I'm assuming some logic applies where a profit must be counted even if no fees
-                if entry['Transaction Type'] == 'Membership':
-                    profit_row['Received From'] = 'Massage Therapy Customers'
-                    profit_row['Account Name'] = '02-008 Membership Income'
-                    profit_row['Description'] = 'Vagaro Merchant Services Depost'
-                    profit_row['Payment Method'] = ''
-                    profit_row['Ref No.'] = ''
-                    profit_row['Credits'] = entry['Qty'] * entry['Price']
-                    profit_row['Debits'] = ''
+                # That profit row must, however, be greater than 0 or the row is skipped
+                if entry['Transaction Type'] == 'Membership' and has_single_debit is False:
+                    credits = entry['Qty'] * entry['Price']
+                    if credits > 0:
+                        profit_row['Received From'] = 'Massage Therapy Customers'
+                        profit_row['Account Name'] = '02-008 Membership Income'
+                        profit_row['Description'] = 'Vagaro Merchant Services Depost'
+                        profit_row['Payment Method'] = ''
+                        profit_row['Ref No.'] = ''
+                        profit_row['Credits'] = credits
+                        profit_row['Debits'] = ''
 
             else:
                 # It's on both reports, so we have a deposit to account for
                 # The total amount for this transaction is the fee from this row + (minus) any net amounts less than 0
                 # TODO: There can be more than 1 of the net negative rows and this needs to be tested
                 negative_net_row = deposit_df.loc[deposit_df['NetAmount'].astype(str).astype(float) < 0]
-                raw_debit = sum([transaction_row['Fee'].iloc[0], negative_net_row['NetAmount'].iloc[0]])
+                if negative_net_row.empty:
+                    raw_debit = round(sum(deposit_df['Fee']), 2)
+                    has_single_debit = True
+                else:
+                    raw_debit = sum([transaction_row['Fee'].iloc[0], negative_net_row['NetAmount'].iloc[0]])
                 net_amount = str(raw_debit).replace('-', '-$')
-                fee_row['Received From'] = 'Vagaro'
-                fee_row['Account Name'] = '01-017 Vagaro Fees'
-                fee_row['Description'] = 'Vagaro Merchant Services Depost'
-                fee_row['Payment Method'] = ''
-                fee_row['Ref No.'] = ''
-                fee_row['Credits'] = ''
-                fee_row['Debits'] = net_amount
+
+                if write_debits:
+                    fee_row['Received From'] = 'Vagaro'
+                    fee_row['Account Name'] = '01-017 Vagaro Fees'
+                    fee_row['Description'] = 'Vagaro Merchant Services Depost'
+                    fee_row['Payment Method'] = ''
+                    fee_row['Ref No.'] = ''
+                    fee_row['Credits'] = ''
+                    fee_row['Debits'] = net_amount
 
                 # We have the fee, now check for a profit on this transaction
-                # We'll use a raw_profit of 0 to cover cases where there is no profit in this transaction
-                raw_profit = 0
-                if entry['Transaction Type'] == 'Membership':
+                # Single debits have "special" rules where we just want to sum the amounts and tips
+                profit_row['Description'] = 'Vagaro Merchant Services Depost'
+                profit_row['Payment Method'] = ''
+                profit_row['Ref No.'] = ''
+                profit_row['Received From'] = 'Massage Therapy Customers'
+                if entry['Transaction Type'] in ['Services', 'Service Add-on']:
+                    tips_row['Description'] = 'Vagaro Merchant Services Depost'
+                    tips_row['Payment Method'] = ''
+                    tips_row['Ref No.'] = ''
+                    tips_row['Received From'] = 'Massage Therapy Customers'
+                    profit_row['Account Name'] = '02-003 Massage Income'
+                    tips_row['Account Name'] = '02-004 Tips for Service Income'
+                    if 'Credits' in profit_row:
+                        profit_row['Credits'] = float(str(profit_row['Credits']).replace('$', '')) + entry['Price']
+                        tips_row['Credits'] = float(str(tips_row['Credits']).replace('$', '')) + entry['Tip'] if 'Credits' in tips_row else np.nan
+                    else:
+                        profit_row['Credits'] = entry['Price']
+                        tips_row['Credits'] = entry['Tip']
+
+                elif entry['Transaction Type'] == 'Membership':
+                    # We'll use a raw_profit of 0 to cover cases where there is no profit in this transaction
+                    raw_profit = 0
                     profit_row['Received From'] = 'Massage Therapy Customers'
                     profit_row['Account Name'] = '02-008 Membership Income'
-                    profit_row['Description'] = 'Vagaro Merchant Services Depost'
-                    profit_row['Payment Method'] = ''
-                    profit_row['Ref No.'] = ''
 
                     # Convert the profit amount back to currency (.00 on whole values)
                     raw_profit = entry['Qty'] * entry['Price']
-                    profit_amount = f"${str(raw_profit)}"
-                    if '.' not in profit_amount:
-                        profit_amount += '.00'
-                    profit_row['Credits'] = profit_amount
-                    profit_row['Debits'] = ''
+                    if raw_profit > 0:
+                        profit_amount = f"${str(raw_profit)}"
+                        if '.' not in profit_amount:
+                            profit_amount += '.00'
+                        profit_row['Credits'] = profit_amount
+                        profit_row['Debits'] = ''
 
-                # Build the totals row to append
-                totals_row['Received From'] = 'Massage Therapy Customers'
-                totals_row['Account Name'] = '00-001 SLW Main Checking'
-                totals_row['Description'] = 'Vagaro Merchant Services Depost'
-                totals_row['Payment Method'] = ''
-                totals_row['Ref No.'] = ''
-                total_amount = raw_profit + raw_debit # We sum here because the value in debits is stored as negative
-
-                # NOTE: These are inverted because that's how banks handle debits/credits
-                if total_amount < 0:
-                    totals_row['Credits'] = total_amount
-                    totals_row['Debits'] = ''
+                # If we totaled the debits, then don't write again
+                if has_single_debit:
+                    write_debits = False
                 else:
-                    totals_row['Credits'] = ''
-                    totals_row['Debits'] = total_amount
+                    # Build the totals row to append
+                    total_amount = raw_profit + raw_debit # We sum here because the value in debits is stored as negative
+                    if total_amount > 0 or write_debits is True:
+                        totals_row['Received From'] = 'Massage Therapy Customers'
+                        totals_row['Account Name'] = '00-001 SLW Main Checking'
+                        totals_row['Description'] = 'Vagaro Merchant Services Depost'
+                        totals_row['Payment Method'] = ''
+                        totals_row['Ref No.'] = ''
+
+                        # NOTE: These are inverted because that's how banks handle debits/credits
+                        if total_amount < 0:
+                            totals_row['Credits'] = total_amount
+                            totals_row['Debits'] = ''
+                        else:
+                            totals_row['Credits'] = ''
+                            totals_row['Debits'] = total_amount
+
+            # If we have just a single debit, aggregate sum the values rather than splitting
+            if has_single_debit and index < len(transaction_df) -1:
+                continue
 
             # Add new row for every profit and fee record
             # Fees come 1st
-            data_set = [fee_row, profit_row, totals_row]
+            if tips_row:
+                data_set = [fee_row, profit_row, tips_row, totals_row]
+            else:
+                data_set = [fee_row, profit_row, totals_row]
             for data_row in data_set:
                 if data_row:
                     data_row['Journal No.'] = self.date
                     data_row['Journal Date'] = self.journal_date
+                    data_row['Credits'] = f"${str(data_row['Credits']).replace('$', '')}" if data_row['Credits'] else np.nan
                     new_row_df = pd.DataFrame([data_row])
                     self.output_df = pd.concat([self.output_df , new_row_df], ignore_index=True)
 
@@ -161,7 +261,7 @@ class JournalDataImporter:
             try:
                 df[column] = df[column].str.replace('$', '', regex=False)
                 df[column] = df[column].apply(lambda x: -float(x.strip('()')) if '(' in x else float(x))
-            except (AttributeError, ValueError):
+            except (AttributeError, ValueError, TypeError):
                 # Not a float, leave alone
                 continue
 
