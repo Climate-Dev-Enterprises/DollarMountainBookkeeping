@@ -8,6 +8,8 @@ import copy
 
 from datetime import datetime
 
+from data_row_builder import DataRowFactory
+
 class JournalDataImporter:
 
     def __init__(self, args):
@@ -68,7 +70,7 @@ class JournalDataImporter:
         '''
         unique_transactions = deposit_df['TranNum'].unique()
         common_transactions = transaction_df[transaction_df['Transaction ID'].isin(unique_transactions)]
-        matching_indices = range(common_transactions.index[0], common_transactions.index[-1])
+        matching_indices = range(common_transactions.index[0], common_transactions.index[-1] + 1)
         discount_fields = []
         for index, entry in transaction_df.iterrows():
             if index in matching_indices:
@@ -116,15 +118,17 @@ class JournalDataImporter:
         has_single_debit = False
         raw_profit = 0
 
+        # Lastly, check if there are any discounts applied in the file
+        # if (transaction_df['Apply Discount'] == 'yes').any():
+        #     has_discounts_applied = True
+        # else:
+        #     has_discounts_applied = False
+
         for index, entry in transaction_df.iterrows():
             # Each row may have profit and fee information associated with it
             # The code at the end ensures these are separate row numbers on the final csv
             if has_single_debit is False:
-                profit_row = {}
-                fee_row = {}
-                totals_row = {}
-                tips_row = {}
-                discounts_row = {}
+                data_row_factory = DataRowFactory()
 
             # Match the transaction ids between the 2 dataframes
             transaction_number = entry['Transaction ID']
@@ -136,13 +140,8 @@ class JournalDataImporter:
                 if entry['Transaction Type'] == 'Membership' and has_single_debit is False:
                     credits = entry['Qty'] * entry['Price']
                     if credits > 0:
-                        profit_row['Received From'] = 'Massage Therapy Customers'
-                        profit_row['Account Name'] = '02-008 Membership Income'
-                        profit_row['Description'] = 'Vagaro Merchant Services Depost'
-                        profit_row['Payment Method'] = ''
-                        profit_row['Ref No.'] = ''
-                        profit_row['Credits'] = credits
-                        profit_row['Debits'] = ''
+                        profit_row = data_row_factory.build_data_row('membership')
+                        profit_row["Credits"] = credits
 
             else:
                 # It's on both reports, so we have a deposit to account for
@@ -157,48 +156,48 @@ class JournalDataImporter:
                 net_amount = str(raw_debit).replace('-', '-$')
 
                 if write_debits:
-                    fee_row['Received From'] = 'Vagaro'
-                    fee_row['Account Name'] = '01-017 Vagaro Fees'
-                    fee_row['Description'] = 'Vagaro Merchant Services Depost'
-                    fee_row['Payment Method'] = ''
-                    fee_row['Ref No.'] = ''
-                    fee_row['Credits'] = ''
-                    fee_row['Debits'] = net_amount
+                    fee_row = data_row_factory.build_data_row('vagaro')
+                    fee_row["Debits"] = net_amount
 
                 # We have the fee, now check for a profit on this transaction
                 # Single debits have "special" rules where we just want to sum the amounts and tips
-                profit_row['Description'] = 'Vagaro Merchant Services Depost'
-                profit_row['Payment Method'] = ''
-                profit_row['Ref No.'] = ''
-                profit_row['Received From'] = 'Massage Therapy Customers'
-                if entry['Transaction Type'] in ['Services', 'Service Add-on']:
-                    tips_row['Description'] = 'Vagaro Merchant Services Depost'
-                    tips_row['Payment Method'] = ''
-                    tips_row['Ref No.'] = ''
-                    tips_row['Received From'] = 'Massage Therapy Customers'
-                    profit_row['Account Name'] = '02-003 Massage Income'
-                    tips_row['Account Name'] = '02-004 Tips for Service Income'
-                    if 'Credits' in profit_row:
-                        profit_row['Credits'] = float(str(profit_row['Credits']).replace('$', '')) + entry['Price']
-                        tips_row['Credits'] = float(str(tips_row['Credits']).replace('$', '')) + entry['Tip'] if 'Credits' in tips_row else np.nan
+                if entry['Transaction Type'] in ['Services', 'Service Add-on'] and entry['Apply Discount'] == 'yes':
+                    # Profits from services as its own row
+                    if 'profit_row' in locals() and 'Credits' in profit_row:
+                        profit_row["Credits"] = float(str(profit_row['Credits']).replace('$', '')) + entry['Price']
                     else:
-                        profit_row['Credits'] = entry['Price']
-                        tips_row['Credits'] = entry['Tip']
+                        profit_row = data_row_factory.build_data_row('income')
+                        profit_row["Credits"] = entry['Price']
+
+                    # Tips applied as its own row
+                    if 'tips_row' in locals() and 'Credits' in tips_row:
+                        tips_row["Credits"] = float(str(tips_row['Credits']).replace('$', '')) + entry['Tip']
+                    elif entry['Tip']:
+                        tips_row = data_row_factory.build_data_row('tips')
+                        tips_row["Credits"] = entry['Tip']
+
+                    # Discounts applied as their own row
+                    if 'discounts_row' in locals() and 'Debits' in discounts_row:
+                        discounts_row["Debits"] = float(str(discounts_row['Debits']).replace('$', '')) + entry['Disc']
+                    elif entry['Disc']:
+                        discounts_row = data_row_factory.build_data_row('discount')
+                        discounts_row["Debits"] = entry['Disc']
+                    print('got profit_row:', profit_row)
 
                 elif entry['Transaction Type'] == 'Membership':
                     # We'll use a raw_profit of 0 to cover cases where there is no profit in this transaction
                     raw_profit = 0
-                    profit_row['Received From'] = 'Massage Therapy Customers'
-                    profit_row['Account Name'] = '02-008 Membership Income'
+                    profit_row = data_row_factory.build_data_row('membership')
 
                     # Convert the profit amount back to currency (.00 on whole values)
                     raw_profit = entry['Qty'] * entry['Price']
+                    if profit_row["Credits"]:
+                        raw_profit += profit_row["Credits"]
                     if raw_profit > 0:
                         profit_amount = f"${str(raw_profit)}"
                         if '.' not in profit_amount:
                             profit_amount += '.00'
-                        profit_row['Credits'] = profit_amount
-                        profit_row['Debits'] = ''
+                        profit_row["Credits"] = profit_amount
 
                 # If we totaled the debits, then don't write again
                 if has_single_debit:
@@ -207,37 +206,47 @@ class JournalDataImporter:
                     # Build the totals row to append
                     total_amount = raw_profit + raw_debit # We sum here because the value in debits is stored as negative
                     if total_amount > 0 or write_debits is True:
-                        totals_row['Received From'] = 'Massage Therapy Customers'
-                        totals_row['Account Name'] = '00-001 SLW Main Checking'
-                        totals_row['Description'] = 'Vagaro Merchant Services Depost'
-                        totals_row['Payment Method'] = ''
-                        totals_row['Ref No.'] = ''
+                        totals_row = data_row_factory.build_data_row('')
 
                         # NOTE: These are inverted because that's how banks handle debits/credits
                         if total_amount < 0:
-                            totals_row['Credits'] = total_amount
-                            totals_row['Debits'] = ''
+                            totals_row["Credits"] = total_amount
                         else:
-                            totals_row['Credits'] = ''
-                            totals_row['Debits'] = total_amount
+                            totals_row["Debits"] = total_amount
 
             # If we have just a single debit, aggregate sum the values rather than splitting
             if has_single_debit and index < len(transaction_df) -1:
                 continue
 
-            # Add new row for every profit and fee record
-            # Fees come 1st
-            if tips_row:
-                data_set = [fee_row, profit_row, tips_row, totals_row]
-            else:
-                data_set = [fee_row, profit_row, totals_row]
+            # Add new row containing every record we got on this pass
+            data_types = [str(x) for x in data_row_factory.data_types]
+            data_set = []
+            for data_type in data_types:
+                if data_type == 'vagaro':
+                    data_set.append(fee_row)
+                elif data_type == 'income' or data_type == 'membership':
+                    data_set.append(profit_row)
+                elif data_type == 'tips':
+                    data_set.append(tips_row)
+                elif data_type == 'discount':
+                    data_set.append(discounts_row)
+                else:
+                    data_set.append(totals_row)
+
+            # if tips_row:
+            #     data_set = [fee_row, profit_row, tips_row, totals_row]
+            # else:
+            #     data_set = [fee_row, profit_row, totals_row]
             for data_row in data_set:
-                if data_row:
-                    data_row['Journal No.'] = self.date
-                    data_row['Journal Date'] = self.journal_date
-                    data_row['Credits'] = f"${str(data_row['Credits']).replace('$', '')}" if data_row['Credits'] else np.nan
-                    new_row_df = pd.DataFrame([data_row])
-                    self.output_df = pd.concat([self.output_df , new_row_df], ignore_index=True)
+                data_row['Journal No.'] = self.date
+                data_row['Journal Date'] = self.journal_date
+                data_row['Credits'] = f'${str(data_row["Credits"]).replace("$", "")}' if data_row["Credits"] else ""
+                data_row['Debits'] = f'${str(data_row["Debits"]).replace("$", "")}' if data_row["Debits"] else ""
+                new_row_df = pd.DataFrame([data_row])
+                self.output_df = pd.concat([self.output_df , new_row_df], ignore_index=True)
+
+            # Garbage collection
+            del data_row_factory
 
         # Write to final csv file
         print(self.output_df)

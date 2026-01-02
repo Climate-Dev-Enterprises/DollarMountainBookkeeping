@@ -80,7 +80,7 @@ class Installer:
         This defaults to running on the current user
         This also comes with logging out of the box using the existing log file directory provided in the repo
 
-        NOTE: This comes with the ability to edit the cronfile out of the box by chmodding the contab
+        NOTE: This comes with the ability to edit the cronfile out of the box by chmodding the crontab
         If you don not want this, comment this section out
         '''
         subprocess.call(['sudo chmod 2755 /usr/bin/crontab'], shell=True)
