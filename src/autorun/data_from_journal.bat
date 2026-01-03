@@ -1,0 +1,1 @@
+"C:\ProgramData\Anaconda3\Python.exe" "C:\Program Files\DollarMountainBookkeeping\src\autorun\__init__.py" date --import-journal --journal-keys="Journal No.,Journal Date,Received From,Account Name,Description,Payment Method,Ref No,Debits,Credits"

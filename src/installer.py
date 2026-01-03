@@ -1,8 +1,6 @@
 import platform
 import os
 import logging
-import schedule
-import time
 import subprocess
 
 from crontab import CronTab
@@ -107,6 +105,6 @@ class Installer:
         '''
         for run_time in self.run_times:
             if self.run_chow_now:
-                os.system(rf'SchTasks /Create /SC DAILY /TN "My Task" /TR "{self.working_directory}/autorun/chow_now_auto.sh" /ST {run_time}:00')
+                os.system(rf'SchTasks /Create /SC DAILY /TN "Chownow" /TR "{self.working_directory}/autorun/chow_now.bat" /ST {run_time}:00')
             if self.run_journals:
-                os.system(rf'SchTasks /Create /SC DAILY /TN "My Task" /TR "{self.working_directory}/autorun/data_from_journal_auto.sh $(date +%Y%m%d)" /ST {run_time}:00')
+                os.system(rf'SchTasks /Create /SC DAILY /TN "Vagaro" /TR "{self.working_directory}/autorun/data_from_journal.bat $(date +%Y%m%d)" /ST {run_time}:00')

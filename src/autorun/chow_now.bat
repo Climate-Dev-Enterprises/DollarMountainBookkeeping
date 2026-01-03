@@ -1,0 +1,1 @@
+"C:\ProgramData\Anaconda3\Python.exe" "C:\Program Files\DollarMountainBookkeeping\src\autorun\__init__.py" --is-chow-now --output-file="../data/ChowNow_JE_Output.csv" --file-path="../data/DisbursementReport_12Aug25_to_24Aug25.xls"
