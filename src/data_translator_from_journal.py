@@ -178,17 +178,16 @@ class JournalDataImporter:
 
                 elif entry['Transaction Type'] == 'Membership' and entry['Apply Discount'] == 'yes':
                     # We'll use a raw_profit of 0 to cover cases where there is no profit in this transaction
-                    raw_profit = 0
-                    membership_row = data_row_factory.build_data_row('membership')
-
                     # Convert the profit amount back to currency (.00 on whole values)
                     raw_profit = entry['Qty'] * entry['Price']
-                    if membership_row["Credits"]:
-                        raw_profit += membership_row["Credits"]
                     if raw_profit > 0:
                         profit_amount = f"${str(raw_profit)}"
                         if '.' not in profit_amount:
                             profit_amount += '.00'
+                    if 'membership_row' in locals() and 'Credits' in membership_row:
+                        membership_row["Credits"] = float(str(membership_row['Credits']).replace('$', '')) + raw_profit
+                    else:
+                        membership_row = data_row_factory.build_data_row('membership')
                         membership_row["Credits"] = profit_amount
 
                 # If we totaled the debits, then don't write again
